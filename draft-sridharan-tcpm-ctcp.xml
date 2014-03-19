@@ -1,0 +1,170 @@
+<?xml version="1.0"?>
+<!DOCTYPE rfc SYSTEM "rfc2629.dtd"[
+  <!ENTITY rfc2119 SYSTEM "http://xml.resource.org/public/rfc/bibxml/reference.RFC.2119.xml">
+  <!ENTITY rfc2581 SYSTEM "http://xml.resource.org/public/rfc/bibxml/reference.RFC.2581.xml">
+  <!ENTITY rfc3649 SYSTEM "http://xml.resource.org/public/rfc/bibxml/reference.RFC.3649.xml">
+]>
+<?rfc toc='yes' ?>
+<?rfc symrefs='yes' ?>
+<?rfc sortrefs='no'?>
+<?rfc compact='yes'?>
+<?rfc comments="yes"?>
+<?rfc inline="yes" ?>
+<!-- <?rfc-ext parse-xml-in-artwork='yes' ?> -->
+<!-- <?xml-stylesheet type='text/xsl' href='rfc2629.xslt' ?> -->
+<rfc docName="draft-sridharan-tcpm-ctcp-03" category="info">
+  <front>
+    <title abbrev='CTCP'>Compound TCP: A New TCP Congestion Control for High-Speed and Long Distance Networks</title>
+    <author initials='S.' surname='Bensley' fullname='Stephen Bensley'>
+      <organization>Microsoft</organization>
+      <address>
+        <postal>
+          <street>One Microsoft Way</street>
+          <city>Redmond</city>
+          <region>WA</region>
+          <code>98052</code>
+          <country>USA</country>
+        </postal>
+        <phone>+1 425 703 5570</phone>
+        <email>sbens@microsoft.com</email>
+      </address>
+    </author>
+    <author initials='M.' surname='Sridharan' fullname='Murari Sridharan'>
+      <organization>Microsoft</organization>
+      <address>
+        <phone>+1 425 703 5438</phone>
+        <email>muraris@microsoft.com</email>
+      </address>
+    </author>
+    <author initials='K.' surname='Tan' fullname='Kun Tan'>
+      <organization>Microsoft Research</organization>
+      <address>
+        <phone>+86 10 59173120 </phone>
+        <email>kuntan@microsoft.com</email>
+      </address>
+    </author>
+    <author initials='D.' surname='Bansal' fullname='Deepak Bansal'>
+      <organization>Microsoft</organization>
+      <address>
+        <phone>+1 425 703 4789</phone>
+        <email>dbansal@microsoft.com</email>
+      </address>
+    </author>
+    <author initials='D.' surname='Thaler' fullname='Dave Thaler'>
+      <organization>Microsoft</organization>
+      <address>
+        <phone>+1 425 703 8835</phone>
+        <email>dthaler@microsoft.com</email>
+      </address>
+    </author>
+    <date year='2014' />
+    <area>Transport</area>
+    <keyword>TCP</keyword>
+    <keyword>CTCP</keyword>
+    <keyword>congestion control</keyword>
+    <abstract>
+       <t> Compound TCP (CTCP) is a modification to TCP's congestion control  mechanism for use with TCP connections with large
+       congestion windows.  This document describes the Compound TCP algorithm in detail, and solicits experimentation and
+       feedback from the wider community.  The key idea behind CTCP is to add a scalable delay-based component to the standard
+       TCP's loss-based congestion control. The sending rate of CTCP is controlled by both loss and delay components. The
+       delay-based component has a scalable window increasing rule that not only efficiently uses the link capacity, but on
+       sensing queue build up, proactively reduces the sending rate.  
+      </t>
+    </abstract>
+  </front>
+
+  <middle>
+    <section title='Introduction'>
+      <t> In this document, we collectively refer to any TCP congestion control  
+          algorithm that employs a linear increase function for congestion  
+          control, including TCP Reno and all its variants as Standard TCP.  This  
+          document describes Compound TCP, a modification to TCP's congestion  
+          control mechanism for fast, long-distance networks. The standard TCP  
+          congestion avoidance algorithm employs an additive increase and  
+          multiplicative decrease (AIMD) scheme, which employs a conservative  
+          linear growth function for increasing the congestion window and  
+          multiplicative decrease function on encountering a loss. For a high- 
+          speed and long delay network, it takes standard TCP an unreasonably  
+          long time to recover the sending rate after a single loss event <xref target="RFC2581"/>, <xref target="RFC3649"/>.
+          Moreover, it is well-known now that in a steady- 
+          state environment, with a packet loss rate of p, the current standard  
+          TCP's average congestion window is inversely proportional to the square  
+          root of the packet loss rate [RFC2581,PADHYE]. Therefore, it requires  
+          an extremely small packet loss rate to sustain a large window. As an  
+          example, Floyd et al. [RFC3649], pointed out that on a 10Gbps link  
+          with 100ms delay, it will roughly take one hour for a standard TCP flow  
+          to fully utilize the link capacity, if no packet is lost or corrupted.  
+          This one hour error-free transmission requires a packet loss rate of  
+          around 10^-11 with 1500-byte size packets (one packet loss over 
+          2,600,000,000 packet transmission!), which is not practical in today's  
+          networks.  
+      </t>
+      <t> There are several proposals to address this fundamental limitation of  
+          TCP. One straightforward way to overcome this limitation is to modify  
+          TCP's increase/decrease rule in its congestion avoidance stage. More  
+          specifically, in the absence of packet loss, the sender increases  
+          congestion window more quickly and decreases it more gently upon a  
+          packet loss. In a mixed network environment, the aggressive behavior of  
+          such an approach may severely degrade the performance of regular TCP  
+          flows whenever the network path is already highly utilized. When an  
+          aggressive high-speed variant flow traverses the bottleneck link with  
+          other standard TCP flows, it may increase its own share of bandwidth by  
+          reducing the throughput of other competing TCP flows. As a result, the  
+          aggressive variants will cause much more self-induced packet losses on  
+          bottleneck links, and push back the throughput of the regular TCP  
+          flows.  
+      </t>
+      <t> Then there is the class of high-speed protocols which use variances in  
+          RTT as a congestion indicator (e.g., [AFRICA,FAST]). Such delay-based  
+          approaches are more-or-less derived from the seminal work of TCP-Vegas  
+          [VEGAS]. An increase in RTT is considered an early indicator of  
+          congestion, and the sending rate is reduced to avoid buffer overflow. The 
+          problem in this approach comes when delay-based and loss-based flows 
+          share the same bottleneck link. While the delay-based flows respond to 
+          increases in RTT by cutting its sending rate, the loss-based flows 
+          continue to increase their sending rate. As a result a delay-based flow 
+          obtains far less bandwidth than its fair share. This weakness is hard to 
+          remedy for purely delay-based approaches.  
+      </t>
+      <t> The design of Compound TCP is to satisfy the efficiency requirement and  
+          the TCP friendliness requirement simultaneously. The key idea is that  
+          if the link is under-utilized, the high-speed protocol should be  
+          aggressive and increase the sending rate quickly. However, once the  
+          link is fully utilized, being aggressive will not only adversely affect  
+          standard TCP flows but will also cause instability. As noted above,  
+          delay-based approaches already have the nice property of adjusting  
+          aggressiveness based on the link utilization, which is observed by the  
+          end-systems as an increase in RTT. CTCP incorporates a scalable delay- 
+          based component into the standard TCP's congestion avoidance algorithm.  
+          Using the delay component as an automatic tuning knob, CTCP is scalable  
+          yet TCP friendly.  
+      </t>
+    </section>
+
+    <section title="Terminology" anchor="term">
+      <t>
+      The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this document are to be interpreted as described in <xref target="RFC2119"/>.
+      </t>
+    </section>
+           
+    <section title='IANA Considerations'>
+      <t> There are no IANA considerations regarding this proposal.
+      </t>
+    </section>
+
+    <section title='Acknowledgements'>
+      <t> Blah, blah, blah.
+      </t>
+    </section>
+  </middle>
+
+  <back>
+    <references title='Normative References'>
+      &rfc2119;
+    </references>
+    <references title='Informative References'>
+      &rfc2581;
+      &rfc3649;
+    </references>
+  </back>
+</rfc>
